@@ -1,7 +1,9 @@
-game_of_life/life
 hello_world
 json
 links_scraper
+log
 news_fetcher
-tetris/tetris
-word_counter/word_counter
+rune
+terminal_control
+nbody
+spectral

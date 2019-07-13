@@ -28,7 +28,7 @@ fn (p mut Parser) gen_json_for_type(typ Type) {
 	// println('gen_json_for_type( $typ.name )')
 	// Register decoder fn
 	mut dec_fn := Fn {
-		pkg: p.pkg
+		pkg: p.mod
 		typ: 'Option_$typ.name'
 		name: js_dec_name(t)
 	}
@@ -45,7 +45,7 @@ fn (p mut Parser) gen_json_for_type(typ Type) {
 	p.table.register_fn(dec_fn)
 	// Register encoder fn
 	mut enc_fn := Fn {
-		pkg: p.pkg
+		pkg: p.mod
 		typ: 'cJSON*'
 		name: js_enc_name(t)
 	}
@@ -104,7 +104,8 @@ string res = tos2("");
 		enc += '  cJSON_AddItemToObject(o,  "$name", $enc_name(val.$name)); \n'
 	}
 	// cJSON_delete
-	p.cgen.fns << '$dec return opt_ok(res); \n}'
+	//p.cgen.fns << '$dec return opt_ok(res); \n}'
+	p.cgen.fns << '$dec return opt_ok(res, sizeof(*res)); \n}'
 	p.cgen.fns << '/*enc start*/ $enc return o;}'
 }
 

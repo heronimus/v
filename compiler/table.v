@@ -4,12 +4,14 @@
 
 module main
 
+import math 
+
 struct Table {
 mut:
 	types     []Type
 	consts    []Var
-	fns       []Fn
-	obf_ids   map_int // obf_ids 'myfunction'] == 23
+	fns       map[string]Fn 
+	obf_ids   map[string]int // obf_ids['myfunction'] == 23
 	packages  []string // List of all modules registered by the application
 	imports   []string // List of all imports
 	flags     []string //  ['-framework Cocoa', '-lglfw3']
@@ -17,32 +19,33 @@ mut:
 	obfuscate bool
 }
 
-enum AccessMod {
-	PRIVATE        // private immutable
-	PRIVET_MUT     // private mutable
-	PUBLIC         // public immmutable (readonly)
-	PUBLIC_MUT     // public, but mutable only in this module
-	PUBLIC_MUT_MUT // public and mutable both inside and outside (not recommended to use, that's why it's so verbose)
+// Holds import information scoped to the parsed file
+struct FileImportTable {
+mut:
+	file_path string
+	imports   map[string]string
 }
 
-enum TypeCategory {
-	TYPE_STRUCT
-	T_CAT_FN
+enum AccessMod {
+	private        // private imkey_mut
+	private_mut     // private key_mut
+	public         // public immkey_mut (readonly)
+	public_mut     // public, but key_mut only in this module
+	public_mut_mut // public and key_mut both inside and outside (not recommended to use, that's why it's so verbose)
 }
 
 struct Type {
 mut:
-	pkg            string
+	mod            string
 	name           string
 	fields         []Var
 	methods        []Fn
 	parent         string
-	cat            TypeCategory
-	gen_types      []string
-	func           Fn // For cat == FN (type kek fn())
-	is_c           bool // C.FILE
+	func           Fn // For cat == FN (type myfn fn())
+	is_c           bool // C.FI.le
 	is_interface   bool
 	is_enum        bool
+	enum_vals []string 
 	// This field is used for types that are not defined yet but are known to exist.
 	// It allows having things like `fn (f Foo) bar()` before `Foo` is defined.
 	// This information is needed in the first pass.
@@ -112,6 +115,7 @@ fn is_float_type(typ string) bool {
 fn new_table(obfuscate bool) *Table {
 	mut t := &Table {
 		obf_ids: map[string]int{}
+		fns: map[string]Fn{}
 		obfuscate: obfuscate
 	}
 	t.register_type('int')
@@ -123,8 +127,7 @@ fn new_table(obfuscate bool) *Table {
 	t.register_type_with_parent('i32', 'int')
 	t.register_type_with_parent('u32', 'int')
 	t.register_type_with_parent('byte', 'int')
-	// t.register_type_with_parent('i64', 'int')
-	t.register_type('i64')
+	t.register_type_with_parent('i64', 'int')
 	t.register_type_with_parent('u64', 'int')
 	t.register_type('byteptr')
 	t.register_type('intptr')
@@ -165,13 +168,13 @@ fn (table &Table) known_pkg(pkg string) bool {
 	return pkg in table.packages
 }
 
-fn (t mut Table) register_const(name, typ, pkg string, is_imported bool) {
+fn (t mut Table) register_const(name, typ, mod string, is_imported bool) {
 	t.consts << Var {
 		name: name
 		typ: typ
 		is_const: true
 		is_import_const: is_imported
-		pkg: pkg
+		mod: mod 
 	}
 }
 
@@ -182,19 +185,12 @@ fn (p mut Parser) register_global(name, typ string) {
 		typ: typ
 		is_const: true
 		is_global: true
-		pkg: p.pkg
+		mod: p.mod 
 	}
 }
 
-// TODO PERF O(N) this slows down the comiler a lot!
-fn (t mut Table) register_fn(f Fn) {
-	// Avoid duplicate fn names TODO why? the name should already be unique?
-	for ff in t.fns {
-		if ff.name == f.name {
-			return
-		}
-	}
-	t.fns << f
+fn (t mut Table) register_fn(new_fn Fn) {
+	t.fns[new_fn.name] = new_fn 
 }
 
 fn (table &Table) known_type(typ string) bool {
@@ -210,24 +206,17 @@ fn (table &Table) known_type(typ string) bool {
 	return false
 }
 
-// TODO PERF O(N) this slows down the comiler a lot!
 fn (t &Table) find_fn(name string) Fn {
-	for f in t.fns {
-		if f.name == name {
-			return f
-		}
-	}
+	f := t.fns[name] 
+	if !isnil(f.name.str) { 
+		return f 
+	} 
 	return Fn{}
 }
 
-// TODO PERF O(N) this slows down the comiler a lot!
 fn (t &Table) known_fn(name string) bool {
-	for f in t.fns {
-		if f.name == name {
-			return true
-		}
-	}
-	return false
+	f := t.find_fn(name) 
+	return f.name != '' 
 }
 
 fn (t &Table) known_const(name string) bool {
@@ -240,7 +229,6 @@ fn (t mut Table) register_type(typ string) {
 	if typ.len == 0 {
 		return
 	}
-	// println('REGISTER TYPE $typ')
 	for typ2 in t.types {
 		if typ2.name == typ {
 			return
@@ -249,17 +237,16 @@ fn (t mut Table) register_type(typ string) {
 	// if t.types.filter( _.name == typ.name).len > 0 {
 	// return
 	// }
-	datyp := Type {
+	t.types << Type {
 		name: typ
 	}
-	t.types << datyp
 }
 
 fn (p mut Parser) register_type_with_parent(strtyp, parent string) {
 	typ := Type {
 		name: strtyp
 		parent: parent
-		pkg: p.pkg
+		mod: p.mod
 	}
 	p.table.register_type2(typ)
 }
@@ -280,18 +267,17 @@ if parent == 'array' {
 pkg = 'builtin'
 }
 */
-	datyp := Type {
+	t.types << Type { 
 		name: typ
 		parent: parent
+		//mod: mod 
 	}
-	t.types << datyp
 }
 
 fn (t mut Table) register_type2(typ Type) {
 	if typ.name.len == 0 {
 		return
 	}
-	// println('register type2 $typ.name')
 	for typ2 in t.types {
 		if typ2.name == typ.name {
 			return
@@ -317,6 +303,10 @@ fn (t mut Type) add_field(name, typ string, is_mut bool, attr string, access_mod
 fn (t &Type) has_field(name string) bool {
 	field := t.find_field(name)
 	return (field.name != '')
+}
+
+fn (t &Type) has_enum_val(name string) bool {
+	return name in t.enum_vals 
 }
 
 fn (t &Type) find_field(name string) Var {
@@ -384,6 +374,7 @@ fn (t &Type) find_method(name string) Fn {
 	return Fn{}
 }
 
+/* 
 fn (t mut Type) add_gen_type(type_name string) {
 	// println('add_gen_type($s)')
 	if t.gen_types.contains(type_name) {
@@ -391,6 +382,7 @@ fn (t mut Type) add_gen_type(type_name string) {
 	}
 	t.gen_types << type_name
 }
+*/ 
 
 fn (p &Parser) find_type(name string) *Type {
 	typ := p.table.find_type(name)
@@ -415,7 +407,7 @@ fn (t &Table) find_type(name string) *Type {
 
 fn (p mut Parser) _check_types(got, expected string, throw bool) bool {
 	p.log('check types got="$got" exp="$expected"  ')
-	if p.translated {
+	if p.pref.translated {
 		return true
 	}
 	// Allow ints to be used as floats
@@ -442,26 +434,29 @@ fn (p mut Parser) _check_types(got, expected string, throw bool) bool {
 		return true
 	}
 	// Todo void* allows everything right now
-	if got.eq('void*') || expected.eq('void*') {
+	if got=='void*' || expected=='void*' {
 		// if !p.builtin_pkg {
-		if p.is_play {
+		if p.pref.is_play {
 			return false
 		}
 		return true
 	}
 	// TODO only allow numeric consts to be assigned to bytes, and
 	// throw an error if they are bigger than 255
-	if got.eq('int') && expected.eq('byte') {
+	if got=='int' && expected=='byte' {
 		return true
 	}
-	if got.eq('byteptr') && expected.eq('byte*') {
+	if got=='byteptr' && expected=='byte*' {
 		return true
 	}
-	if got.eq('int') && expected.eq('byte*') {
+	if got=='byte*' && expected=='byteptr' {
+		return true
+	} 
+	if got=='int' && expected=='byte*' {
 		return true
 	}
 	// byteptr += int
-	if got.eq('int') && expected.eq('byteptr') {
+	if got=='int' && expected=='byteptr' {
 		return true
 	}
 	if got == 'Option' && expected.starts_with('Option_') {
@@ -476,7 +471,7 @@ fn (p mut Parser) _check_types(got, expected string, throw bool) bool {
 		return true
 	}
 	// NsColor* return 0
-	if !p.is_play {
+	if !p.pref.is_play {
 		if expected.ends_with('*') && got == 'int' {
 			return true
 		}
@@ -487,7 +482,7 @@ fn (p mut Parser) _check_types(got, expected string, throw bool) bool {
 		// return true
 		// }
 		// Allow pointer arithmetic
-		if expected.eq('void*') && got.eq('int') {
+		if expected=='void*' && got=='int' {
 			return true
 		}
 	}
@@ -554,6 +549,7 @@ fn type_default(typ string) string {
 	case 'byte*': return '0'
 	case 'bool': return '0'
 	}
+	return '{}' 
 	return ''
 }
 
@@ -569,7 +565,8 @@ fn (t &Table) is_interface(name string) bool {
 
 // Do we have fn main()?
 fn (t &Table) main_exists() bool {
-	for f in t.fns {
+	for entry in t.fns.entries { 
+		f := t.fns[entry.key] 
 		if f.name == 'main' {
 			return true
 		}
@@ -644,8 +641,84 @@ fn (table &Table) cgen_name_type_pair(name, typ string) string {
 	}
 	// TODO tm hack, do this for all C struct args
 	else if typ == 'tm' {
-		return 'struct tm $name'
+		return 'struct /*TM*/ tm $name'
 	}
 	return '$typ $name'
 }
 
+fn is_valid_int_const(val, typ string) bool {
+	x := val.int() 
+	switch typ {
+	case 'byte', 'u8': return 0 <= x && x <= math.MaxU8 
+	case 'u16': return 0 <= x && x <= math.MaxU16 
+	//case 'u32': return 0 <= x && x <= math.MaxU32 
+	//case 'u64': return 0 <= x && x <= math.MaxU64 
+	////////////// 
+	case 'i8': return math.MinI8 <= x && x <= math.MaxI8 
+	case 'i16': return math.MinI16 <= x && x <= math.MaxI16 
+	case 'int', 'i32': return math.MinI32 <= x && x <= math.MaxI32 
+	//case 'i64': 
+		//x64 := val.i64() 
+		//return i64(-(1<<63)) <= x64 && x64 <= i64((1<<63)-1) 
+	} 
+	return true 
+}
+
+// Once we have a module format we can read from module file instead
+// this is not optimal
+fn (table &Table) qualify_module(mod string, file_path string) string {
+	for m in table.imports {
+		if m.contains('.') && m.contains(mod) {
+			m_parts := m.split('.')
+			m_path := m_parts.join('/')
+			if mod == m_parts[m_parts.len-1] && file_path.contains(m_path) {
+				return m
+			}
+		}
+	}
+	return mod
+}
+
+fn new_file_import_table(file_path string) *FileImportTable {
+	mut t := &FileImportTable{
+		file_path: file_path
+		imports:   map[string]string{}
+	}
+	return t
+}
+
+fn (fit &FileImportTable) known_import(mod string) bool {
+	return fit.imports.exists(mod) || fit.is_aliased(mod)
+}
+
+fn (fit mut FileImportTable) register_import(mod string) {
+	fit.register_alias(mod, mod)
+}
+
+fn (fit mut FileImportTable) register_alias(alias string, mod string) {
+	if !fit.imports.exists(alias) {
+		fit.imports[alias] = mod
+	} else {
+		panic('Cannot import $mod as $alias: import name $alias already in use in "${fit.file_path}".')
+	}
+}
+
+fn (fit &FileImportTable) known_alias(alias string) bool {
+	return fit.imports.exists(alias)
+}
+
+fn (fit &FileImportTable) is_aliased(mod string) bool {
+	for i in fit.imports.keys() {
+		if fit.imports[i] == mod {
+			return true
+		}
+	}
+	return false
+}
+
+fn (fit &FileImportTable) resolve_alias(alias string) string {
+	if fit.imports.exists(alias) {
+		return fit.imports[alias]
+	}
+	return ''
+}

@@ -4,6 +4,8 @@
 
 module main
 
+import os
+
 struct CGen {
 	out          os.File
 	out_path     string
@@ -31,15 +33,23 @@ mut:
 }
 
 fn new_cgen(out_name_c string) *CGen {
+	//println('TmpPath: "$TmpPath"')
+	path:='$TmpPath/$out_name_c'
+	out := os.create(path) or {
+		println('failed to create $path') 
+		return &CGen{} 
+} 
+	 
 	gen := &CGen {
-		out_path: '$TmpPath/$out_name_c'
-		out: os.create('$TmpPath/$out_name_c')
+		out_path: path 
+		out: out 
+		lines: _make(0, 1000, sizeof(string)) 
 	}
 	return gen
 }
 
 fn (g mut CGen) genln(s string) {
-	if g.nogen || g.run == RUN_DECLS {
+	if g.nogen || g.run == .decl {
 		return
 	}
 	if g.is_tmp {
@@ -55,7 +65,7 @@ fn (g mut CGen) genln(s string) {
 }
 
 fn (g mut CGen) gen(s string) {
-	if g.nogen || g.run == RUN_DECLS {
+	if g.nogen || g.run == .decl {
 		return
 	}
 	if g.is_tmp {
@@ -68,7 +78,7 @@ fn (g mut CGen) gen(s string) {
 
 fn (g mut CGen) save() {
 	s := g.lines.join('\n')
-	g.out.appendln(s)
+	g.out.writeln(s)
 	g.out.close()
 }
 
@@ -151,10 +161,9 @@ fn (g mut CGen) register_thread_fn(wrapper_name, wrapper_text, struct_text strin
 fn (c mut V) prof_counters() string {
 	mut res := []string
 	// Global fns
-	for f in c.table.fns {
-		res << 'double ${c.table.cgen_name(f)}_time;'
-		// println(f.name)
-	}
+	//for f in c.table.fns {
+		//res << 'double ${c.table.cgen_name(f)}_time;'
+	//}
 	// Methods
 	for typ in c.table.types {
 		// println('')
@@ -170,11 +179,10 @@ fn (c mut V) prof_counters() string {
 fn (p mut Parser) print_prof_counters() string {
 	mut res := []string
 	// Global fns
-	for f in p.table.fns {
-		counter := '${p.table.cgen_name(f)}_time'
-		res << 'if ($counter) printf("%%f : $f.name \\n", $counter);'
-		// println(f.name)
-	}
+	//for f in p.table.fns {
+		//counter := '${p.table.cgen_name(f)}_time'
+		//res << 'if ($counter) printf("%%f : $f.name \\n", $counter);'
+	//}
 	// Methods
 	for typ in p.table.types {
 		// println('')
@@ -215,4 +223,25 @@ fn (g mut CGen) add_to_main(s string) {
 	println('add to main')
 	g.fn_main = g.fn_main + s
 }
+
+
+fn build_thirdparty_obj_file(flag string) { 
+	obj_path := flag.all_after(' ') 
+	if os.file_exists(obj_path) {
+		return 
+	} 
+	println('$obj_path not found, building it...') 
+	parent := obj_path.all_before_last('/').trim_space() 
+	files := os.ls(parent) 
+	//files := os.ls(parent).filter(_.ends_with('.c'))  TODO 
+	mut cfiles := '' 
+	for file in files {
+		if file.ends_with('.c') { 
+			cfiles += parent + '/' + file + ' ' 
+		} 
+	} 
+	cc := if os.user_os() == 'windows' { 'gcc' } else { 'cc' } // TODO clang support on Windows  
+	res := os.exec('$cc -c -o $obj_path $cfiles') 
+	println(res) 
+} 
 
