@@ -1,17 +1,17 @@
 ---
 name: Bug report for V
-about: Please use the apropriate label when submitting an issue: bug/feature request/question.
+about: Please use the appropriate label when submitting an issue: bug/feature request/question.
 title: "New issue"
 labels: ''
 assignees: ''
 
 ---
 
+<!-- You can use `v doctor` to fill up the next fields -->
+
 #### V version:
 
-
 #### OS:
-
 
 #### C Compiler:
 
